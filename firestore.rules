@@ -1,0 +1,34 @@
+rules_version = '2';
+
+// כללי האבטחה של "היומן של יפעת".
+// מדביקים את כל הקובץ ב-Firebase Console ← Firestore Database ← Rules ← Publish.
+// המייל בפונקציה ownerEmail חייב להיות זהה ל-ownerEmail בקובץ config.js.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function ownerEmail() { return 'kfirdaabul1@gmail.com'; }
+
+    function signedIn() { return request.auth != null; }
+    function myEmail() { return request.auth.token.email.lower(); }
+    function verified() {
+      return signedIn() && request.auth.token.email != null && request.auth.token.email_verified == true;
+    }
+    function isOwner() { return verified() && myEmail() == ownerEmail(); }
+    function accessDoc() { return /databases/$(database)/documents/access/main; }
+    function isAllowed() {
+      return isOwner() || (verified() && exists(accessDoc()) && myEmail() in get(accessDoc()).data.emails);
+    }
+
+    // רשימת מי יכול להיכנס: כל מחובר יכול לבדוק אותה, רק בעל המערכת משנה
+    match /access/{id} {
+      allow read: if verified();
+      allow write: if isOwner();
+    }
+
+    // היומן, התיקים וההגדרות: רק מי שברשימה
+    match /events/{id}   { allow read, write: if isAllowed(); }
+    match /cases/{id}    { allow read, write: if isAllowed(); }
+    match /settings/{id} { allow read, write: if isAllowed(); }
+  }
+}
