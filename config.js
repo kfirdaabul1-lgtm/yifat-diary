@@ -7,7 +7,7 @@ window.APP_CONFIG = {
 
   // מעתיקים מ-Firebase Console ← Project settings ← Your apps ← SDK setup and configuration ← Config
   firebase: {
-    apiKey: "PASTE_API_KEY_HERE",
+    apiKey: "AIzaSyCAObRi...",
     authDomain: "PROJECT_ID.firebaseapp.com",
     projectId: "PROJECT_ID",
     storageBucket: "PROJECT_ID.appspot.com",
