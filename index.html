@@ -92,6 +92,14 @@ main.in,main.wide{padding-top:calc(16px + 4px)}
 .gcard p{margin:0}
 .acc-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0;border-top:1px solid var(--line)}
 .acc-row span{overflow-wrap:anywhere;direction:ltr;text-align:right}
+.or{display:flex;align-items:center;gap:10px;color:var(--soft);font-size:.88rem}
+.or::before,.or::after{content:"";flex:1;height:1px;background:var(--line)}
+.pwform{display:flex;flex-direction:column;gap:6px;text-align:right}
+.pwform .lbl{margin:6px 0 0}
+.pwform .btn{margin-top:10px}
+.links{display:flex;justify-content:center;gap:18px;flex-wrap:wrap}
+.lnk{color:var(--accent);text-decoration:underline;text-underline-offset:3px;font-size:.95rem;padding:6px 2px}
+.btn[disabled]{opacity:.6}
 /* Drawer */
 .drawer-bg{position:fixed;inset:0;background:rgba(8,12,22,.5);z-index:70}
 .drawer{position:fixed;top:0;bottom:0;left:0;width:min(300px,86vw);background:var(--panel);z-index:71;display:flex;flex-direction:column;gap:4px;padding:calc(14px + env(safe-area-inset-top,0px)) 14px calc(18px + env(safe-area-inset-bottom,0px)) max(14px,env(safe-area-inset-left,0px));box-shadow:0 0 40px rgb(0 0 0 / .18);overflow-y:auto;overscroll-behavior:contain}
@@ -391,8 +399,8 @@ main.wide{max-width:1180px;margin:0 auto;padding-left:max(16px,env(safe-area-ins
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
-<!-- Connection settings: fill in config.js -->
-<script src="config.js"></script>
+<!-- Connection settings: config.js -->
+<script src="config.js?v=2"></script>
 <script>
 const DAYS=['ראשון','שני','שלישי','רביעי','חמישי','שישי','שבת'];
 const DAYS_S=['א׳','ב׳','ג׳','ד׳','ה׳','ו׳','ש׳'];
@@ -503,17 +511,73 @@ function initFirebase(){
   auth.getRedirectResult().catch(e=>toast('הכניסה לא הצליחה ('+(e.code||'')+')'));
   let started=false;
   auth.onAuthStateChanged(async u=>{
-    if(!u){if(started)location.reload();else gate(`<p>כניסה עם חשבון Google.</p><button class="btn main" id="g-login">כניסה עם Google</button><p class="note">אם הכניסה לא נפתחת, פותחים את הקישור ישירות ב-Chrome או Safari.</p>`);
-      const b=$('g-login');if(b)b.onclick=login;return}
-    if(started)return;started=true;
-    me.email=String(u.email||'').toLowerCase();
-    me.owner=!!(u.emailVerified&&me.email===String(CFG.ownerEmail||'').trim().toLowerCase());
-    let ok=me.owner;
-    try{const a=await fdb.doc('access/main').get();if(a.exists){access={emails:[],...a.data()};if(!ok)ok=(access.emails||[]).map(x=>String(x).toLowerCase()).includes(me.email)}}catch(e){}
-    if(!ok){gate(`<p>החשבון <b dir="ltr">${esc(me.email)}</b> עוד לא קיבל גישה ליומן.</p><p class="note">בעל המערכת מוסיף אותו בעמוד הגדרות ← מי יכול להיכנס.</p><button class="btn ghost" id="g-out">כניסה עם חשבון אחר</button>`);$('g-out').onclick=logout;return}
-    if(me.owner)fdb.doc('access/main').onSnapshot(x=>{access=x.exists?{emails:[],...x.data()}:{emails:[]};setBuilt=false;render()},()=>{});
-    lsLoad();gate(null);wire(fdb);render();
+    if(!u){if(started)location.reload();else loginScreen('login');return}
+    if(started)return;
+    const pw=(u.providerData||[]).some(p=>p.providerId==='password');
+    if(pw&&!u.emailVerified){verifyScreen(u);return}
+    started=true;proceed(u);
   });
+}
+async function proceed(u){
+  const fdb=FB.fdb;
+  me.email=String(u.email||'').toLowerCase();
+  me.owner=!!(u.emailVerified&&me.email===String(CFG.ownerEmail||'').trim().toLowerCase());
+  let ok=me.owner;
+  try{const a=await fdb.doc('access/main').get();if(a.exists){access={emails:[],...a.data()};if(!ok)ok=(access.emails||[]).map(x=>String(x).toLowerCase()).includes(me.email)}}catch(e){}
+  if(!ok){gate(`<p>החשבון <b dir="ltr">${esc(me.email)}</b> עוד לא קיבל גישה ליומן.</p><p class="note">בעל המערכת מוסיף אותו בעמוד הגדרות ← מי יכול להיכנס.</p><button class="btn ghost" id="g-out">כניסה עם חשבון אחר</button>`);$('g-out').onclick=logout;return}
+  if(me.owner)fdb.doc('access/main').onSnapshot(x=>{access=x.exists?{emails:[],...x.data()}:{emails:[]};setBuilt=false;render()},()=>{});
+  lsLoad();gate(null);wire(fdb);render();
+}
+/* Sign-in screens: Google, or email + password (first time = create password, verified by email) */
+const AUTH_ERR={'auth/invalid-credential':'המייל או הסיסמה שגויים.','auth/wrong-password':'המייל או הסיסמה שגויים.','auth/user-not-found':'אין חשבון עם המייל הזה. בפעם הראשונה לוחצים "יצירת סיסמה".',
+  'auth/invalid-email':'כתובת המייל לא תקינה.','auth/email-already-in-use':'כבר יש חשבון עם המייל הזה. נכנסים עם הסיסמה, או עם Google אם כך נרשמתם.','auth/weak-password':'הסיסמה צריכה להיות באורך 6 תווים לפחות.',
+  'auth/too-many-requests':'יותר מדי ניסיונות. מחכים כמה דקות ומנסים שוב.','auth/missing-password':'צריך לכתוב סיסמה.','auth/operation-not-allowed':'כניסה עם סיסמה עוד לא הופעלה ב-Firebase.','auth/network-request-failed':'אין חיבור לאינטרנט.'};
+const authMsg=e=>AUTH_ERR[e&&e.code]||('הפעולה לא הצליחה ('+((e&&e.code)||'')+')');
+function loginScreen(mode,emailPre){
+  const signup=mode==='signup', reset=mode==='reset';
+  gate(`${reset?'<p>נשלח אליך קישור לבחירת סיסמה חדשה.</p>':signup?'<p>פעם ראשונה עם מייל וסיסמה? בוחרים סיסמה, ונשלח מייל קצר לאימות הכתובת.</p>':''}
+    ${signup||reset?'':`<button class="btn main" id="g-login">כניסה עם Google</button><div class="or"><span>או עם מייל וסיסמה</span></div>`}
+    <form id="pw-form" class="pwform" novalidate>
+      <label class="lbl" for="pw-email">מייל</label><input class="field" id="pw-email" type="email" dir="ltr" autocomplete="username" value="${esc(emailPre||'')}">
+      ${reset?'':`<label class="lbl" for="pw-pass">סיסמה</label><input class="field" id="pw-pass" type="password" dir="ltr" autocomplete="${signup?'new-password':'current-password'}">`}
+      ${signup?'<label class="lbl" for="pw-pass2">שוב את הסיסמה</label><input class="field" id="pw-pass2" type="password" dir="ltr" autocomplete="new-password">':''}
+      <div class="err" id="pw-err" hidden></div>
+      <button class="btn ${signup||reset?'main':'blue'}" type="submit" id="pw-go">${reset?'שליחת קישור':signup?'יצירת סיסמה':'כניסה'}</button>
+    </form>
+    <div class="links">${signup||reset?'<button class="lnk" data-m="login">חזרה לכניסה</button>':'<button class="lnk" data-m="signup">פעם ראשונה? יצירת סיסמה</button><button class="lnk" data-m="reset">שכחתי סיסמה</button>'}</div>
+    <p class="note">אם הכניסה עם Google לא נפתחת, פותחים את הקישור ישירות ב-Chrome או Safari.</p>`);
+  const g=$('gate'), q=x=>g.querySelector(x);
+  if(q('#g-login'))q('#g-login').onclick=login;
+  g.querySelectorAll('[data-m]').forEach(b=>b.onclick=()=>loginScreen(b.dataset.m,q('#pw-email').value.trim()));
+  const err=m=>{const e=q('#pw-err');e.textContent=m;e.hidden=!m};
+  q('#pw-form').onsubmit=async ev=>{ev.preventDefault();err('');
+    const email=q('#pw-email').value.trim(), pass=q('#pw-pass')?q('#pw-pass').value:'';
+    if(!email)return err('צריך לכתוב מייל.');
+    const btn=q('#pw-go');btn.disabled=true;
+    try{
+      if(reset){await FB.auth.sendPasswordResetEmail(email);gate(`<p>אם יש חשבון עם <b dir="ltr">${esc(email)}</b>, נשלח אליו קישור לבחירת סיסמה חדשה. כדאי לבדוק גם בספאם.</p><button class="btn main" id="g-back">חזרה לכניסה</button>`);$('g-back').onclick=()=>loginScreen('login',email);return}
+      if(signup){
+        if(pass.length<6){btn.disabled=false;return err('הסיסמה צריכה להיות באורך 6 תווים לפחות.')}
+        if(pass!==q('#pw-pass2').value){btn.disabled=false;return err('שתי הסיסמאות לא זהות.')}
+        const c=await FB.auth.createUserWithEmailAndPassword(email,pass);
+        try{await c.user.sendEmailVerification()}catch(_){}
+        verifyScreen(c.user,true);return}
+      await FB.auth.signInWithEmailAndPassword(email,pass);
+    }catch(e){btn.disabled=false;err(authMsg(e))}
+  };
+}
+function verifyScreen(u,justSent){
+  gate(`<p>${justSent?'שלחנו':'צריך לאמת את כתובת המייל. שלחנו'} קישור אימות ל-<b dir="ltr">${esc(u.email)}</b>.</p>
+    <p class="note">פותחים את המייל (כדאי לבדוק גם בספאם), לוחצים על הקישור וחוזרים לכאן.</p>
+    <div class="err" id="v-err" hidden></div>
+    <button class="btn main" id="v-done">אימתתי, להמשיך</button>
+    <button class="btn ghost" id="v-again">שליחת המייל שוב</button>
+    <button class="btn ghost" id="v-out">כניסה עם חשבון אחר</button>`);
+  const err=m=>{const e=$('v-err');e.textContent=m;e.hidden=!m};
+  $('v-done').onclick=async()=>{try{await u.reload();await u.getIdToken(true)}catch(_){}
+    if(FB.auth.currentUser&&FB.auth.currentUser.emailVerified){proceed(FB.auth.currentUser)}else err('עדיין לא אומת. לוחצים על הקישור במייל ואז שוב כאן.')};
+  $('v-again').onclick=async()=>{try{await u.sendEmailVerification();err('');toast('נשלח שוב')}catch(e){err(authMsg(e))}};
+  $('v-out').onclick=logout;
 }
 async function login(){const pr=new firebase.auth.GoogleAuthProvider();pr.setCustomParameters({prompt:'select_account'});
   try{await FB.auth.signInWithPopup(pr)}
@@ -1099,7 +1163,7 @@ function renderSettings(){
     <div class="btns"><button class="btn main" id="s-save">שמירת ההגדרות</button></div>
     <div class="note" id="s-state"></div>
     ${FB&&me.owner?`<section class="setcard"><h2 class="h">מי יכול להיכנס</h2>
-      <div class="note">כל מי שברשימה נכנס עם חשבון Google שלו ורואה ומעדכן את אותו יומן. את עצמך (בעל המערכת) לא צריך להוסיף.</div>
+      <div class="note">כל מי שברשימה נכנס עם Google, או עם המייל הזה וסיסמה שהוא בוחר בעצמו בכניסה הראשונה ("פעם ראשונה? יצירת סיסמה"). כולם רואים ומעדכנים את אותו יומן. את עצמך (בעל המערכת) לא צריך להוסיף.</div>
       <div>${(access.emails||[]).map(x=>`<div class="acc-row"><span>${esc(x)}</span><button class="mini" data-rm-acc="${esc(x)}">הסרה</button></div>`).join('')||'<div class="note">עוד לא נוספו אנשים.</div>'}</div>
       <div class="payin"><input class="field" id="acc-new" type="email" dir="ltr" placeholder="name@gmail.com" aria-label="מייל להוספה"><button class="btn ghost" id="acc-add">הוספה</button></div>
     </section>`:''}`;
